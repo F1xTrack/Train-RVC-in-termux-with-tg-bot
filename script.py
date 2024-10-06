@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Параметры по умолчанию
 LEARNING_RATE = 0.001
@@ -13,12 +13,11 @@ BATCH_SIZE = 1
 EPOCHS = 5
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "assets")
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
+selected_folder = None  # Переменная для хранения выбранной папки
 
 # Токен бота
 TOKEN = "7245200603:AAEYsKtM4a6OSdYC3QpsajIhM2YAqMeL4uc"
-
-# Глобальная переменная для хранения выбора папки
-selected_folder = None
+bot = telebot.TeleBot(TOKEN)
 
 # Пример простой нейросетевой модели
 class SimpleAudioModel(nn.Module):
@@ -86,96 +85,74 @@ def train_model(audio_dir, batch_size, epochs):
     print("Обучение завершено!")
     return model
 
-# Создание инлайн-кнопок для управления параметрами
-def start(update, context):
-    keyboard = [
-        [InlineKeyboardButton("Запустить обучение", callback_data='start_training')],
-        [InlineKeyboardButton("Указать количество эпох", callback_data='set_epochs')],
-        [InlineKeyboardButton("Указать batch size", callback_data='set_batch_size')],
-        [InlineKeyboardButton("Выбрать папку с ассетами", callback_data='set_assets_dir')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text('Выберите действие:', reply_markup=reply_markup)
+# Стартовая команда /start
+@bot.message_handler(commands=['start'])
+def start(message):
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("Запустить обучение", callback_data='start_training'))
+    markup.add(InlineKeyboardButton("Указать количество эпох", callback_data='set_epochs'))
+    markup.add(InlineKeyboardButton("Указать batch size", callback_data='set_batch_size'))
+    markup.add(InlineKeyboardButton("Выбрать папку с ассетами", callback_data='set_assets_dir'))
+    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=markup)
 
-# Обработка нажатий инлайн-кнопок
-def button(update, context):
+# Обработка инлайн-кнопок
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
     global selected_folder
-    query = update.callback_query
-    query.answer()
-    
-    if query.data == 'start_training':
-        query.edit_message_text(text="Начинаем обучение...")
-        # Запуск обучения с текущими параметрами
+    if call.data == 'start_training':
+        bot.send_message(call.message.chat.id, "Начинаем обучение...")
         model = train_model(AUDIO_DIR, BATCH_SIZE, EPOCHS)
-        query.edit_message_text(text="Обучение завершено.")
-    elif query.data == 'set_epochs':
-        query.edit_message_text(text="Введите количество эпох командой /epochs <количество>")
-    elif query.data == 'set_batch_size':
-        query.edit_message_text(text="Введите batch size командой /batch_size <размер>")
-    elif query.data == 'set_assets_dir':
-        show_folders(update, context)
-    elif query.data.startswith('select_folder_'):
-        selected_folder = query.data.replace('select_folder_', '')
-        query.edit_message_text(text=f"Вы выбрали папку: {selected_folder}")
-        show_confirm_button(update, context)
+        bot.send_message(call.message.chat.id, "Обучение завершено.")
+    elif call.data == 'set_epochs':
+        bot.send_message(call.message.chat.id, "Введите количество эпох командой /epochs <количество>")
+    elif call.data == 'set_batch_size':
+        bot.send_message(call.message.chat.id, "Введите batch size командой /batch_size <размер>")
+    elif call.data == 'set_assets_dir':
+        show_folders(call.message)
 
-# Функция для показа кнопки подтверждения выбора папки
-def show_confirm_button(update, context):
-    keyboard = [[InlineKeyboardButton("Готово ✅", callback_data='confirm_selection')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    context.bot.send_message(chat_id=update.callback_query.message.chat_id, text="Подтвердите выбор:", reply_markup=reply_markup)
-
-# Функция для отображения списка папок
-def show_folders(update, context):
-    folders = [f for f in os.listdir(os.path.dirname(__file__)) if os.path.isdir(f)]
-    keyboard = [[InlineKeyboardButton(folder, callback_data=f'select_folder_{folder}')] for folder in folders]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.callback_query.edit_message_text(text="Выберите папку:", reply_markup=reply_markup)
-
-# Подтверждение выбора папки
-def confirm_selection(update, context):
-    global AUDIO_DIR
-    if selected_folder:
-        AUDIO_DIR = os.path.join(os.path.dirname(__file__), selected_folder)
-        context.bot.send_message(chat_id=update.callback_query.message.chat_id, text=f"Папка с ассетами установлена: {AUDIO_DIR}")
-    else:
-        context.bot.send_message(chat_id=update.callback_query.message.chat_id, text="Выбор папки не был сделан.")
-
-# Установка количества эпох через команду
-def set_epochs(update, context):
+# Команда для установки количества эпох
+@bot.message_handler(commands=['epochs'])
+def set_epochs(message):
     global EPOCHS
     try:
-        EPOCHS = int(context.args[0])
-        update.message.reply_text(f"Количество эпох установлено: {EPOCHS}")
+        EPOCHS = int(message.text.split()[1])
+        bot.reply_to(message, f"Количество эпох установлено: {EPOCHS}")
     except (IndexError, ValueError):
-        update.message.reply_text("Использование: /epochs <количество>")
+        bot.reply_to(message, "Использование: /epochs <количество>")
 
-# Установка batch size через команду
-def set_batch_size(update, context):
+# Команда для установки batch size
+@bot.message_handler(commands=['batch_size'])
+def set_batch_size(message):
     global BATCH_SIZE
     try:
-        BATCH_SIZE = int(context.args[0])
-        update.message.reply_text(f"Batch size установлен: {BATCH_SIZE}")
+        BATCH_SIZE = int(message.text.split()[1])
+        bot.reply_to(message, f"Batch size установлен: {BATCH_SIZE}")
     except (IndexError, ValueError):
-        update.message.reply_text("Использование: /batch_size <размер>")
+        bot.reply_to(message, "Использование: /batch_size <размер>")
 
-def main():
-    # Настройка бота
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+# Отображение доступных папок
+def show_folders(message):
+    folders = [f for f in os.listdir(os.path.dirname(__file__)) if os.path.isdir(f)]
+    markup = InlineKeyboardMarkup()
+    for folder in folders:
+        markup.add(InlineKeyboardButton(folder, callback_data=f'select_folder_{folder}'))
+    bot.send_message(message.chat.id, "Выберите папку:", reply_markup=markup)
 
-    # Команды бота
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("epochs", set_epochs))
-    dp.add_handler(CommandHandler("batch_size", set_batch_size))
+# Подтверждение выбора папки
+@bot.callback_query_handler(func=lambda call: call.data.startswith('select_folder_'))
+def select_folder(call):
+    global selected_folder, AUDIO_DIR
+    selected_folder = call.data.replace('select_folder_', '')
+    AUDIO_DIR = os.path.join(os.path.dirname(__file__), selected_folder)
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("Готово ✅", callback_data='confirm_selection'))
+    bot.send_message(call.message.chat.id, f"Вы выбрали папку: {selected_folder}. Подтвердите выбор:", reply_markup=markup)
 
-    # Обработка нажатий кнопок
-    dp.add_handler(CallbackQueryHandler(button))
-    dp.add_handler(CallbackQueryHandler(confirm_selection, pattern='confirm_selection'))
+# Подтверждение выбора папки ассетов
+@bot.callback_query_handler(func=lambda call: call.data == 'confirm_selection')
+def confirm_selection(call):
+    global AUDIO_DIR
+    bot.send_message(call.message.chat.id, f"Папка с ассетами установлена: {AUDIO_DIR}")
 
-    # Запуск бота
-    updater.start_polling()
-    updater.idle()
-
-if __name__ == "__main__":
-    main()
+# Запуск бота
+bot.polling()
