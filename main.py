@@ -1,13 +1,10 @@
 import telebot
 from telebot import types
 import sqlite3
-import time
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-import numpy as np
-import soundfile as sf
+from preprocess_audio import preprocess_audio  # Импортируем функцию для предобработки аудио
+from train_model import SimpleRVCModel, train_model  # Импортируем модель и функцию для обучения
 
 # Токен бота
 TOKEN = '7245200603:AAEYsKtM4a6OSdYC3QpsajIhM2YAqMeL4uc'
@@ -40,9 +37,10 @@ class MyDataset(Dataset):
     def __init__(self, audio_archive):
         self.audio_files = []
         self.labels = []
-        # Загрузка аудиофайлов и меток
+        # Загрузка и предобработка аудиофайлов
         for file in audio_archive:
-            self.audio_files.append(sf.read(file))
+            mel_spec = preprocess_audio(file)  # Предобработка аудиофайла
+            self.audio_files.append(mel_spec)
             self.labels.append(0)  # метка для каждого аудиофайла
 
     def __len__(self):
@@ -51,45 +49,30 @@ class MyDataset(Dataset):
     def __getitem__(self, idx):
         audio = self.audio_files[idx]
         label = self.labels[idx]
-        # Обработка аудиофайла
-        audio = Mangio_RVC_Fork(audio)
+        audio = torch.tensor(audio).unsqueeze(0)  # Добавляем канал (1, H, W)
         return audio, label
 
-# Функция для обучения модели
-def train_model(model, device, loader, optimizer, criterion, epochs):
-    for epoch in range(epochs):
-        for batch in loader:
-            inputs, labels = batch
-            inputs, labels = inputs.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-        print(f'Epoch {epoch+1}, Loss: {loss.item()}')
-
-# Процесс обучения
+# Функция для старта процесса обучения
 def start_training_process(chat_id, settings):
     # Загрузка данных
     dataset = MyDataset(settings['audio_archive'])
     loader = DataLoader(dataset, batch_size=settings['batch_size'], shuffle=True)
 
     # Создание модели
-    model = Mangio_RVC_Fork()
+    model = SimpleRVCModel()  # Используем нашу новую модель
     device = torch.device('cpu')
     model.to(device)
 
     # Обучение модели
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
     train_model(model, device, loader, optimizer, criterion, settings['total_epochs'])
 
     # Сохранение модели
-    torch.save(model.state_dict(),'model.pth')
+    torch.save(model.state_dict(), 'model.pth')
 
     # Отправка модели пользователю
     bot.send_document(chat_id, open("model.pth", 'rb'))
-    bot.send_document(chat_id, open("model.index", 'rb'))
 
 # Команда /start
 @bot.message_handler(commands=['start'])
