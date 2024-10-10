@@ -8,7 +8,6 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import soundfile as sf
-from Mangio_RVC_Fork import Mangio_RVC_Fork
 
 # Токен бота
 TOKEN = '7245200603:AAEYsKtM4a6OSdYC3QpsajIhM2YAqMeL4uc'
