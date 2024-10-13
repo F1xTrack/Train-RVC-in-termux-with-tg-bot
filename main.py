@@ -3,8 +3,10 @@ from telebot import types
 import sqlite3
 import torch
 from torch.utils.data import Dataset, DataLoader
-from preprocess_audio import preprocess_audio  # Импортируем функцию для предобработки аудио
-from train_model import SimpleRVCModel, train_model  # Импортируем модель и функцию для обучения
+from preprocess_audio import preprocess_audio
+from learn_model import SimpleRVCModel
+import numpy as np
+import os
 
 # Токен бота
 TOKEN = '7245200603:AAEYsKtM4a6OSdYC3QpsajIhM2YAqMeL4uc'
@@ -39,9 +41,9 @@ class MyDataset(Dataset):
         self.labels = []
         # Загрузка и предобработка аудиофайлов
         for file in audio_archive:
-            mel_spec = preprocess_audio(file)  # Предобработка аудиофайла
+            mel_spec = preprocess_audio(file)
             self.audio_files.append(mel_spec)
-            self.labels.append(0)  # метка для каждого аудиофайла
+            self.labels.append(0)
 
     def __len__(self):
         return len(self.audio_files)
@@ -49,7 +51,7 @@ class MyDataset(Dataset):
     def __getitem__(self, idx):
         audio = self.audio_files[idx]
         label = self.labels[idx]
-        audio = torch.tensor(audio).unsqueeze(0)  # Добавляем канал (1, H, W)
+        audio = torch.tensor(audio).unsqueeze(0)
         return audio, label
 
 # Функция для старта процесса обучения
@@ -59,14 +61,22 @@ def start_training_process(chat_id, settings):
     loader = DataLoader(dataset, batch_size=settings['batch_size'], shuffle=True)
 
     # Создание модели
-    model = SimpleRVCModel()  # Используем нашу новую модель
+    model = SimpleRVCModel()
     device = torch.device('cpu')
     model.to(device)
 
     # Обучение модели
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
-    train_model(model, device, loader, optimizer, criterion, settings['total_epochs'])
+    for epoch in range(settings['total_epochs']):
+        for i, (audio, label) in enumerate(loader):
+            audio, label = audio.to(device), label.to(device)
+            optimizer.zero_grad()
+            output = model(audio)
+            loss = criterion(output, label)
+            loss.backward()
+            optimizer.step()
+        print(f'Epoch {epoch+1}, Loss: {loss.item()}')
 
     # Сохранение модели
     torch.save(model.state_dict(),'model.pth')
@@ -77,7 +87,7 @@ def start_training_process(chat_id, settings):
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start_command(message):
-    bot.send_message(message.chat.id, "Привет! Нажми /train, чтобы начать обучение.")
+    bot.send_message(message.chat.id, "Привет! Нажми /train, чтобы начать обучение своей первой модели.")
 
 # Команда /train
 @bot.message_handler(commands=['train'])
@@ -122,11 +132,11 @@ def callback_inline(call):
         msg = bot.send_message(call.message.chat.id, "Введите размер батча:")
         bot.register_next_step_handler(msg, set_batch_size)
 
-    # Выбор аудиофайлов
+    # Изменение аудиофайлов
     elif call.data == 'change_audio':
-        markup = types.InlineKeyboardMarkup(row_width=1)
         cursor.execute('SELECT archive_name FROM archives WHERE user_id=?', (user_id,))
         archives = cursor.fetchall()
+        markup = types.InlineKeyboardMarkup(row_width=1)
         for archive in archives:
             markup.add(types.InlineKeyboardButton(archive[0], callback_data=f'select_audio_{archive[0]}'))
         bot.send_message(call.message.chat.id, "Выберите архив:", reply_markup=markup)
