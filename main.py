@@ -176,6 +176,11 @@ def receive_audio_archive(message):
         file_name = message.document.file_name
         cursor.execute('INSERT INTO archives (user_id, archive_name) VALUES (?,?)', (message.from_user.id, file_name))
         conn.commit()
+        
+        # Проверяем, существует ли ключ в словаре user_settings
+        if message.from_user.id not in user_settings:
+            user_settings[message.from_user.id] = default_settings.copy()
+        
         user_settings[message.from_user.id]['audio_archive'] = file_name
         bot.send_message(message.chat.id, f"Архив {file_name} загружен.")
         # Обрабатываем аудиофайлы
