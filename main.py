@@ -65,11 +65,11 @@ def start_training_process(chat_id, settings):
 
     # Обучение модели
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    criterion = nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss()
     train_model(model, device, loader, optimizer, criterion, settings['total_epochs'])
 
     # Сохранение модели
-    torch.save(model.state_dict(), 'model.pth')
+    torch.save(model.state_dict(),'model.pth')
 
     # Отправка модели пользователю
     bot.send_document(chat_id, open("model.pth", 'rb'))
@@ -77,7 +77,7 @@ def start_training_process(chat_id, settings):
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start_command(message):
-    bot.send_message(message.chat.id, "Привет! Нажми /train, чтобы начать обучение своей первой модели.")
+    bot.send_message(message.chat.id, "Привет! Нажми /train, чтобы начать обучение.")
 
 # Команда /train
 @bot.message_handler(commands=['train'])
@@ -122,16 +122,14 @@ def callback_inline(call):
         msg = bot.send_message(call.message.chat.id, "Введите размер батча:")
         bot.register_next_step_handler(msg, set_batch_size)
 
-    # Загрузка или выбор аудиофайлов
+    # Выбор аудиофайлов
     elif call.data == 'change_audio':
         markup = types.InlineKeyboardMarkup(row_width=1)
-        button_upload = types.InlineKeyboardButton("Загрузить новый архив", callback_data='upload_audio')
-        markup.add(button_upload)
         cursor.execute('SELECT archive_name FROM archives WHERE user_id=?', (user_id,))
         archives = cursor.fetchall()
         for archive in archives:
             markup.add(types.InlineKeyboardButton(archive[0], callback_data=f'select_audio_{archive[0]}'))
-        bot.send_message(call.message.chat.id, "Выберите архив или загрузите новый:", reply_markup=markup)
+        bot.send_message(call.message.chat.id, "Выберите архив:", reply_markup=markup)
 
     # Начало обучения
     elif call.data =='start_training':
@@ -157,20 +155,31 @@ def set_batch_size(message):
         bot.send_message(message.chat.id, "Неправильный формат! Введите число.")
     train_command(message)
 
-# Обработка загрузки аудиофайлов
-@bot.callback_query_handler(func=lambda call: call.data == 'upload_audio')
-def handle_upload_audio(call):
-    msg = bot.send_message(call.message.chat.id, "Загрузите архив с аудиофайлами.")
+# Команда /upload_audio
+@bot.message_handler(commands=['upload_audio'])
+def upload_audio(message):
+    msg = bot.send_message(message.chat.id, "Загрузите архив с аудиофайлами.")
     bot.register_next_step_handler(msg, receive_audio_archive)
 
 def receive_audio_archive(message):
     if message.document:
-        user_id = message.from_user.id
         file_name = message.document.file_name
-        cursor.execute('INSERT INTO archives (user_id, archive_name) VALUES (?,?)', (user_id, file_name))
+        cursor.execute('INSERT INTO archives (user_id, archive_name) VALUES (?,?)', (message.from_user.id, file_name))
         conn.commit()
-        user_settings[user_id]['audio_archive'] = file_name
+        user_settings[message.from_user.id]['audio_archive'] = file_name
         bot.send_message(message.chat.id, f"Архив {file_name} загружен.")
+        # Обрабатываем аудиофайлы
+        audio_files = []
+        for file in os.listdir('audio_files'):
+            if file.endswith('.wav'):
+                audio_files.append(os.path.join('audio_files', file))
+        # Предобработка аудиофайлов
+        mel_specs = []
+        for audio_file in audio_files:
+            mel_spec = preprocess_audio(audio_file)
+            mel_specs.append(mel_spec)
+        # Сохраняем предобработанные аудиофайлы
+        np.save('preprocessed_audio.npy', mel_specs)
         train_command(message)
 
 # Запуск бота
